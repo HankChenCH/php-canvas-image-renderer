@@ -1,0 +1,54 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: PHPUnit (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: '8.3'
+            experimental: false
+          - php: '8.4'
+            experimental: true
+    continue-on-error: ${{ matrix.experimental }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # companion 包：核心包以 path repository（../php-canvas-next）引用，
+      # CI 中 checkout 到工作区子目录并重写 path 指向
+      - name: Checkout core (php-canvas-next)
+        uses: actions/checkout@v4
+        with:
+          repository: hankchen/php-canvas-next
+          path: php-canvas-next
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: gd, mbstring, exif, intl
+          coverage: none
+
+      - name: Point path repository at checked-out core
+        run: composer config repos.php-canvas-next path ./php-canvas-next
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Run tests
+        run: composer test
