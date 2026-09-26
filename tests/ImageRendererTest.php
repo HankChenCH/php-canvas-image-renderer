@@ -5,7 +5,7 @@ namespace HankChen\CanvasNext\Renderer\Image\Tests;
 use HankChen\CanvasNext\Canvas;
 use HankChen\CanvasNext\Contracts\DownloaderInterface;
 use HankChen\CanvasNext\Exception\MaterializeException;
-use HankChen\CanvasNext\Expand\CanvasExpander;
+use HankChen\CanvasNext\Hydrate\CanvasHydrator;
 use HankChen\CanvasNext\Layer\AbstractLayer;
 use HankChen\CanvasNext\Layer\ImageLayer;
 use HankChen\CanvasNext\Layer\QrCodeLayer;
@@ -249,14 +249,14 @@ class ImageRendererTest extends CanvasTestCase
 
         $sourceGraph = Canvas::make(100, 40, $table)->graph();
         $canvas = Canvas::fromGraph($sourceGraph);
-        $expanded = (new CanvasExpander())->expand($canvas, [
+        $hydrated = (new CanvasHydrator())->hydrate($canvas, [
             'items' => [
                 ['img' => 'https://cdn.example.com/tpl-' . uniqid() . '.png'],
                 ['img' => 'https://cdn.example.com/tpl-' . uniqid() . '.png'],
             ],
         ]);
 
-        $image = (new ImageRenderer(new ResourceResolver($downloader)))->render($expanded);
+        $image = (new ImageRenderer(new ResourceResolver($downloader)))->render($hydrated);
 
         // 两行实例：行区图片铺满格（绿底被红图覆盖），表壳剩余区按声明白底
         $this->assertPixelSame([255, 0, 0], $image, 50, 5);
