@@ -3,15 +3,21 @@
 namespace HankChen\CanvasNext\Renderer\Image\Tests;
 
 use HankChen\CanvasNext\Canvas;
+use HankChen\CanvasNext\Contracts\DownloaderInterface;
+use HankChen\CanvasNext\Exception\MaterializeException;
+use HankChen\CanvasNext\Expand\CanvasExpander;
+use HankChen\CanvasNext\Layer\AbstractLayer;
 use HankChen\CanvasNext\Layer\ImageLayer;
 use HankChen\CanvasNext\Layer\QrCodeLayer;
 use HankChen\CanvasNext\Layer\TableLayer;
 use HankChen\CanvasNext\Layer\TableCellLayer;
 use HankChen\CanvasNext\Layer\TableRowLayer;
+use HankChen\CanvasNext\Layer\TableRowTemplate;
 use HankChen\CanvasNext\Layer\TextLayer;
 use HankChen\CanvasNext\Renderer\Image\ImageManagerFactory;
 use HankChen\CanvasNext\Renderer\Image\ImageRenderer;
 use HankChen\CanvasNext\Renderer\Image\Tests\Support\CanvasTestCase;
+use HankChen\CanvasNext\ResourceManagers\ResourceResolver;
 use Intervention\Image\Geometry\Factories\RectangleFactory;
 use Intervention\Image\Interfaces\ImageInterface;
 
@@ -152,6 +158,110 @@ class ImageRendererTest extends CanvasTestCase
             extension_loaded('imagick'),
             $manager->driver instanceof \Intervention\Image\Drivers\Imagick\Driver
         );
+    }
+
+    public function testMaterializationIsLazyAtDrawTime(): void
+    {
+        // 渲染期物化（ADR 0005）：resolve() 预遍历一旦发生即测试失败；
+        // 物化在绘制分派前按图层惰性触发
+        $downloader = new class($this->pngBytes(8, 8, '#f00')) implements DownloaderInterface {
+            public array $calls = [];
+
+            public function __construct(private readonly string $content)
+            {
+            }
+
+            public function download($url)
+            {
+                $this->calls[] = $url;
+
+                return $this->content;
+            }
+        };
+
+        $spy = new class($downloader) extends ResourceResolver {
+            public array $resolvedLayers = [];
+
+            public function resolve(Canvas $canvas): void
+            {
+                throw new \RuntimeException('render() 不应触发预遍历物化');
+            }
+
+            public function resolveLayer(AbstractLayer $layer): void
+            {
+                $this->resolvedLayers[] = get_class($layer);
+                parent::resolveLayer($layer);
+            }
+        };
+
+        $url = 'https://cdn.example.com/lazy-' . uniqid() . '.png';
+        $renderer = new ImageRenderer($spy);
+        $image = $renderer->render(Canvas::make(20, 20, ImageLayer::make(20, 20, '#fff')->setImage($url)));
+
+        $this->assertSame([ImageLayer::class], $spy->resolvedLayers);
+        $this->assertCount(1, $downloader->calls);
+        $this->assertPixelSame([255, 0, 0], $image, 10, 10);
+    }
+
+    public function testMaterializeFailureThrowsAtDrawTime(): void
+    {
+        // 失败语义：绘制中抛出、无产物返回（渲染面随异常丢弃）
+        $downloader = new class implements DownloaderInterface {
+            public function download($url)
+            {
+                return false;
+            }
+        };
+
+        $renderer = new ImageRenderer(new ResourceResolver($downloader));
+        $layer = ImageLayer::make(10, 10)->setImage('https://cdn.example.com/missing-' . uniqid() . '.png');
+
+        try {
+            $renderer->renderLayer($layer);
+            $this->fail('物化失败必须在绘制期抛出');
+        } catch (MaterializeException $e) {
+            $this->assertSame('resource_download_failed', $e->getErrorCode());
+        }
+    }
+
+    public function testTemplateTablePipelineRendersExpandedRows(): void
+    {
+        // V2 全链路：graph 序列化 → 解码 → 展开 → 位图渲染
+        $downloader = new class($this->pngBytes(10, 10, '#f00')) implements DownloaderInterface {
+            public function __construct(private readonly string $content)
+            {
+            }
+
+            public function download($url)
+            {
+                return $this->content;
+            }
+        };
+
+        $templateRow = (new TableRowTemplate())->setHeight(10);
+        $cell = (new TableCellLayer())->setWidth(100)->setHeight(10, '#0f0');
+        $cell->addTemplateContentLayer(ImageLayer::make(100, 10)->setExpression('{{row.img}}'));
+        $templateRow->addCell($cell);
+
+        $table = TableLayer::make(100, 40, '#fff');
+        $table->setRowsPath('items');
+        $table->setTemplate($templateRow);
+
+        $sourceGraph = Canvas::make(100, 40, $table)->graph();
+        $canvas = Canvas::fromGraph($sourceGraph);
+        $expanded = (new CanvasExpander())->expand($canvas, [
+            'items' => [
+                ['img' => 'https://cdn.example.com/tpl-' . uniqid() . '.png'],
+                ['img' => 'https://cdn.example.com/tpl-' . uniqid() . '.png'],
+            ],
+        ]);
+
+        $image = (new ImageRenderer(new ResourceResolver($downloader)))->render($expanded);
+
+        // 两行实例：行区图片铺满格（绿底被红图覆盖），表壳剩余区按声明白底
+        $this->assertPixelSame([255, 0, 0], $image, 50, 5);
+        $this->assertPixelSame([255, 0, 0], $image, 50, 15);
+        $this->assertPixelSame([255, 255, 255], $image, 50, 35);
     }
 
     /**
