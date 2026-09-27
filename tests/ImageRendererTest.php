@@ -149,6 +149,35 @@ class ImageRendererTest extends CanvasTestCase
         @unlink($path);
     }
 
+    /**
+     * visible=false 的根图层渲染跳过（契约层，layer-panel-ux 工单 01）：
+     * 隐藏层在渲染序末位（视觉最上层），若未被跳过会盖住可见层
+     */
+    public function testHiddenRootLayerExcludedFromBitmap(): void
+    {
+        $canvas = Canvas::make(40, 20,
+            ImageLayer::make(40, 20, '#0f0'),
+            ImageLayer::make(40, 20, '#f00')->setVisible(false),
+        );
+
+        $image = (new ImageRenderer())->render($canvas);
+
+        $this->assertPixelSame([0, 255, 0], $image, 20, 10);
+    }
+
+    /** 跳过发生在绘制分派（含惰性物化）之前：隐藏层的资源引用不触发解析 */
+    public function testHiddenRootLayerSkipsMaterialization(): void
+    {
+        $canvas = Canvas::make(40, 20,
+            ImageLayer::make(40, 20, '#0f0'),
+            ImageLayer::make(40, 20, '#f00')->setImage('/nonexistent/hidden.png')->setVisible(false),
+        );
+
+        $image = (new ImageRenderer())->render($canvas);
+
+        $this->assertPixelSame([0, 255, 0], $image, 20, 10);
+    }
+
     public function testManagerIsSharedAndUsesAvailableDriver(): void
     {
         $manager = ImageManagerFactory::make();
