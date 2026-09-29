@@ -18,6 +18,8 @@ use HankChen\CanvasNext\Renderer\Image\ImageManagerFactory;
 use HankChen\CanvasNext\Renderer\Image\ImageRenderer;
 use HankChen\CanvasNext\Renderer\Image\Tests\Support\CanvasTestCase;
 use HankChen\CanvasNext\ResourceManagers\ResourceResolver;
+use HankChen\CanvasNext\Runtime\Cancellation;
+use HankChen\CanvasNext\Runtime\NullCancellation;
 use Intervention\Image\Geometry\Factories\RectangleFactory;
 use Intervention\Image\Interfaces\ImageInterface;
 
@@ -25,7 +27,7 @@ class ImageRendererTest extends CanvasTestCase
 {
     public function testRenderLayerPaintsBackground(): void
     {
-        $image = (new ImageRenderer())->renderLayer(ImageLayer::make(10, 10, '#f00'));
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), ImageLayer::make(10, 10, '#f00'));
 
         $this->assertSame(10, $image->width());
         $this->assertSame(10, $image->height());
@@ -34,7 +36,7 @@ class ImageRendererTest extends CanvasTestCase
 
     public function testRenderLayerReturnsRawImageWhenNoContent(): void
     {
-        $image = (new ImageRenderer())->renderLayer(ImageLayer::make(8, 8));
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), ImageLayer::make(8, 8));
 
         $this->assertSame(8, $image->width());
     }
@@ -45,7 +47,7 @@ class ImageRendererTest extends CanvasTestCase
         $wide = $this->twoColorPng(40, 10, '#f00', '#00f', 20);
 
         $layer = ImageLayer::make(20, 20, '#fff')->setImage($wide);
-        $image = (new ImageRenderer())->renderLayer($layer);
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $layer);
 
         $this->assertPixelSame([255, 0, 0], $image, 5, 10);
         $this->assertPixelSame([0, 0, 255], $image, 15, 10);
@@ -61,7 +63,7 @@ class ImageRendererTest extends CanvasTestCase
             ->setHorizontalAlign('left')
             ->setVerticalAlign('top');
 
-        $image = (new ImageRenderer())->renderLayer($layer);
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $layer);
 
         $this->assertPixelSame([255, 0, 0], $image, 10, 4);
         $this->assertPixelSame([255, 255, 255], $image, 9, 4);
@@ -77,7 +79,7 @@ class ImageRendererTest extends CanvasTestCase
         $layer = TextLayer::make(100, 30, '#fff')->setText('ABC测试')
             ->setFont($ttf ?? '1', 12, '#000');
 
-        $image = (new ImageRenderer())->renderLayer($layer);
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $layer);
 
         $dark = $this->countDarkPixels($image);
         $this->assertGreaterThan(0, $dark);
@@ -93,7 +95,7 @@ class ImageRendererTest extends CanvasTestCase
         $layer = TextLayer::make(100, 30, '#fff')->setText('fallback')
             ->setFont('1', 12, '#000');
 
-        $image = (new ImageRenderer())->renderLayer($layer);
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $layer);
 
         $this->assertGreaterThan(0, $this->countDarkPixels($image));
     }
@@ -107,7 +109,7 @@ class ImageRendererTest extends CanvasTestCase
         $row2->addCell(TableCellLayer::make(100, 20, '#0f0'));
         $table->addRow($row1)->addRow($row2);
 
-        $image = (new ImageRenderer())->renderLayer($table);
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $table);
 
         $this->assertPixelSame([255, 0, 0], $image, 50, 5);
         $this->assertPixelSame([0, 255, 0], $image, 50, 15);
@@ -118,7 +120,7 @@ class ImageRendererTest extends CanvasTestCase
     {
         $layer = QrCodeLayer::make(60, 60)->setText('https://example.com');
 
-        $image = (new ImageRenderer())->renderLayer($layer);
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $layer);
 
         $pixel = $this->pixel($image, 0, 0);
         $this->assertLessThan(60, $pixel[0]);
@@ -133,7 +135,7 @@ class ImageRendererTest extends CanvasTestCase
         $blue = ImageLayer::make(30, 30, '#0f0')->setImage($this->solidPng(30, 30, '#0f0'))->setPriority(1);
 
         $renderer = new ImageRenderer();
-        $image = $renderer->render(Canvas::make(60, 30, $red, $blue));
+        $image = $renderer->render(new NullCancellation(), Canvas::make(60, 30, $red, $blue));
 
         $this->assertPixelSame([0, 255, 0], $image, 10, 10);
         $this->assertPixelSame([255, 0, 0], $image, 50, 25);
@@ -160,7 +162,7 @@ class ImageRendererTest extends CanvasTestCase
             ImageLayer::make(40, 20, '#f00')->setVisible(false),
         );
 
-        $image = (new ImageRenderer())->render($canvas);
+        $image = (new ImageRenderer())->render(new NullCancellation(), $canvas);
 
         $this->assertPixelSame([0, 255, 0], $image, 20, 10);
     }
@@ -173,7 +175,7 @@ class ImageRendererTest extends CanvasTestCase
             ImageLayer::make(40, 20, '#f00')->setImage('/nonexistent/hidden.png')->setVisible(false),
         );
 
-        $image = (new ImageRenderer())->render($canvas);
+        $image = (new ImageRenderer())->render(new NullCancellation(), $canvas);
 
         $this->assertPixelSame([0, 255, 0], $image, 20, 10);
     }
@@ -200,7 +202,7 @@ class ImageRendererTest extends CanvasTestCase
             {
             }
 
-            public function download($url)
+            public function download(Cancellation $ctx, string $url): string|false
             {
                 $this->calls[] = $url;
 
@@ -211,21 +213,21 @@ class ImageRendererTest extends CanvasTestCase
         $spy = new class($downloader) extends ResourceResolver {
             public array $resolvedLayers = [];
 
-            public function resolve(Canvas $canvas): void
+            public function resolve(Cancellation $ctx, Canvas $canvas): void
             {
                 throw new \RuntimeException('render() 不应触发预遍历物化');
             }
 
-            public function resolveLayer(AbstractLayer $layer): void
+            public function resolveLayer(Cancellation $ctx, AbstractLayer $layer): void
             {
                 $this->resolvedLayers[] = get_class($layer);
-                parent::resolveLayer($layer);
+                parent::resolveLayer($ctx, $layer);
             }
         };
 
         $url = 'https://cdn.example.com/lazy-' . uniqid() . '.png';
         $renderer = new ImageRenderer($spy);
-        $image = $renderer->render(Canvas::make(20, 20, ImageLayer::make(20, 20, '#fff')->setImage($url)));
+        $image = $renderer->render(new NullCancellation(), Canvas::make(20, 20, ImageLayer::make(20, 20, '#fff')->setImage($url)));
 
         $this->assertSame([ImageLayer::class], $spy->resolvedLayers);
         $this->assertCount(1, $downloader->calls);
@@ -236,7 +238,7 @@ class ImageRendererTest extends CanvasTestCase
     {
         // 失败语义：绘制中抛出、无产物返回（渲染面随异常丢弃）
         $downloader = new class implements DownloaderInterface {
-            public function download($url)
+            public function download(Cancellation $ctx, string $url): string|false
             {
                 return false;
             }
@@ -246,7 +248,7 @@ class ImageRendererTest extends CanvasTestCase
         $layer = ImageLayer::make(10, 10)->setImage('https://cdn.example.com/missing-' . uniqid() . '.png');
 
         try {
-            $renderer->renderLayer($layer);
+            $renderer->renderLayer(new NullCancellation(), $layer);
             $this->fail('物化失败必须在绘制期抛出');
         } catch (MaterializeException $e) {
             $this->assertSame('resource_download_failed', $e->getErrorCode());
@@ -261,7 +263,7 @@ class ImageRendererTest extends CanvasTestCase
             {
             }
 
-            public function download($url)
+            public function download(Cancellation $ctx, string $url): string|false
             {
                 return $this->content;
             }
@@ -285,7 +287,7 @@ class ImageRendererTest extends CanvasTestCase
             ],
         ]);
 
-        $image = (new ImageRenderer(new ResourceResolver($downloader)))->render($hydrated);
+        $image = (new ImageRenderer(new ResourceResolver($downloader)))->render(new NullCancellation(), $hydrated);
 
         // 两行实例：行区图片铺满格（绿底被红图覆盖），表壳剩余区按声明白底
         $this->assertPixelSame([255, 0, 0], $image, 50, 5);

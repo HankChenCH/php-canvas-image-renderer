@@ -18,6 +18,7 @@ use HankChen\CanvasNext\Layer\TableCellLayer;
 use HankChen\CanvasNext\Layer\TableRowLayer;
 use HankChen\CanvasNext\Layer\TextLayer;
 use HankChen\CanvasNext\Renderer\Image\ImageRenderer;
+use HankChen\CanvasNext\Runtime\NullCancellation;
 
 // 字体候选：优先带 CJK 字形的字体，避免中文变豆腐块
 $ttf = null;
@@ -121,7 +122,7 @@ $footer = TextLayer::make(400, 30)
 $canvas = Canvas::make(400, 400, $base, $header, $title, $paragraph, $table, $qr, $strip, $footer);
 
 $output = $argv[1] ?? (__DIR__ . '/../visual-check.png');
-$image = (new ImageRenderer())->render($canvas);
+$image = (new ImageRenderer())->render(new NullCancellation(), $canvas);
 $image->save($output);
 
 echo "已输出: {$output} (" . $image->width() . 'x' . $image->height() . ")\n";
