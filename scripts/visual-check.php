@@ -1,7 +1,8 @@
 <?php
 
 /**
- * 目验脚本：渲染一张真实场景样图（中文断行、表格、二维码、图片、边框、优先级）
+ * 目验脚本：渲染一张真实场景样图（中文断行、表格、二维码、图片、边框、优先级、
+ * 宽自适应文本层）
  *
  * 优先级语义与旧库一致：priority 越大越先渲染（越垫底）
  *
@@ -37,7 +38,7 @@ foreach ([
 $font = $ttf ?? '';
 
 // 白色底（最垫底），避免透明区域
-$base = ImageLayer::make(400, 400, '#ffffff')->setPriority(11);
+$base = ImageLayer::make(400, 480, '#ffffff')->setPriority(11);
 
 // 头图色块
 $header = ImageLayer::make(400, 90, '#2d6cdf')->setPosition(0, 0)->setPriority(10);
@@ -119,7 +120,27 @@ $footer = TextLayer::make(400, 30)
     ->setPosition(0, 370)
     ->setPriority(4);
 
-$canvas = Canvas::make(400, 400, $base, $header, $title, $paragraph, $table, $qr, $strip, $footer);
+// 宽自适应文本层（ADR 0014）：盒宽 = 未断行自然宽 + 横向 padding，
+// 背景/边框随自然宽生效——盒宽贴合内容即目验通过
+$autoWidthSingle = TextLayer::make('auto', 'auto', '#fff7e6')
+    ->setText('自动宽度贴合内容')
+    ->setFont($font, 16, '#333333')
+    ->setPadding(8)
+    ->setBorder(1, '#e6a23c')
+    ->setPosition(20, 415)
+    ->setPriority(4);
+
+// autoWidth + autowrap 组合退化为不折行：显式换行拆段取最大段宽
+$autoWidthMultiline = TextLayer::make('auto', 'auto', '#f0f9eb')
+    ->setText("第一段\n显式换行后的更长一段")
+    ->setFont($font, 14, '#333333')
+    ->setPadding(8)
+    ->setBorder(1, '#67c23a')
+    ->setAutowrap(true)
+    ->setPosition(220, 415)
+    ->setPriority(4);
+
+$canvas = Canvas::make(400, 480, $base, $header, $title, $paragraph, $table, $qr, $strip, $footer, $autoWidthSingle, $autoWidthMultiline);
 
 $output = $argv[1] ?? (__DIR__ . '/../visual-check.png');
 $image = (new ImageRenderer())->render(new NullCancellation(), $canvas);
