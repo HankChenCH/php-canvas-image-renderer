@@ -128,6 +128,42 @@ class ImageRendererTest extends CanvasTestCase
         $this->assertLessThan(60, $pixel[2]);
     }
 
+    /**
+     * quiet zone 语义（三端契约）：QR padding 留白 = 码外静区——码内切于内容盒
+     * （side = min(内容区宽高)），left/top 缺省锚定 padding 原点，留白露图层盒背景
+     */
+    public function testQrPaddingLeavesQuietZone(): void
+    {
+        $layer = QrCodeLayer::make(100, 100, '#ffffff')
+            ->setPadding(20)
+            ->setText('https://example.com');
+
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $layer);
+
+        // padding 区 = 静区（白）：旧语义按宽铺放 (0,0) 起，此处是码的 finder 区（暗）
+        $this->assertPixelSame([255, 255, 255], $image, 10, 10);
+        // 码从 (20,20) 起：finder 图案内部仍暗
+        $pixel = $this->pixel($image, 25, 25);
+        $this->assertLessThan(128, $pixel[0]);
+    }
+
+    /** 非正方形盒：码内切（side = min(100, 60) = 60）且 center/center 在整盒内居中 */
+    public function testQrCenterAlignCentersSquareInNonSquareBox(): void
+    {
+        $layer = QrCodeLayer::make(100, 60, '#ffffff')
+            ->setText('https://example.com')
+            ->setHorizontalAlign('center')
+            ->setVerticalAlign('center');
+
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $layer);
+
+        // 码放 [20,80]×[0,60]：左静区白（旧语义按宽铺满会在此处落在 finder 上）
+        $this->assertPixelSame([255, 255, 255], $image, 10, 10);
+        $this->assertPixelSame([255, 255, 255], $image, 90, 30);
+        $pixel = $this->pixel($image, 25, 5);
+        $this->assertLessThan(128, $pixel[0]);
+    }
+
     public function testCanvasRenderCompositesAndSave(): void
     {
         // priority 高者先画在下层：红色大图垫底，蓝色小块后画在上层
