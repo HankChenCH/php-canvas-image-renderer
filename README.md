@@ -19,16 +19,18 @@ composer require hankchen/php-canvas-next hankchen/php-canvas-image-renderer
 use HankChen\CanvasNext\Canvas;
 use HankChen\CanvasNext\Layer\ImageLayer;
 use HankChen\CanvasNext\Renderer\Image\ImageRenderer;
+use HankChen\CanvasNext\Runtime\NullCancellation;
 
 $canvas = Canvas::make(400, 300,
     ImageLayer::make(400, 300, '#ffffff')->setPriority(10)
 );
 
-$image = (new ImageRenderer())->render($canvas);   // Intervention\Image\Interfaces\ImageInterface
+// 第一个参数是渲染取消上下文；无取消需求传 NullCancellation
+$image = (new ImageRenderer())->render(new NullCancellation(), $canvas);   // Intervention\Image\Interfaces\ImageInterface
 $image->save('/tmp/out.png');
 ```
 
-- 单图层渲染：`(new ImageRenderer())->renderLayer($layer)`
+- 单图层渲染：`(new ImageRenderer())->renderLayer(new NullCancellation(), $layer)`
 - 自定义资源下载器：`new ImageRenderer(new \HankChen\CanvasNext\ResourceManagers\ResourceResolver($downloader))`
 
 ## 环境要求
