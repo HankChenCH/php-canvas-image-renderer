@@ -21,7 +21,7 @@ php scripts/visual-check.php out.png   # 目验样图（中文禁则/表格/二�
 
 ## Rules and gotchas
 
-- **依赖核心包**：`"hankchen/php-canvas-next": "^1.0"`，经 composer path repository 指向同级 `../php-canvas-next`（本地 symlink）。包发布 packagist 后可移除该 repositories 段。
+- **依赖核心包**：`"hankchen/php-canvas-next": "^1.0"`，走 Packagist（两包均已发布）。本地跨包联调临时指向同级核心包：`composer config repositories.php-canvas-next path ../php-canvas-next` 后 `composer update hankchen/php-canvas-next`——该改动写入 composer.json，**勿提交**。
 - **核心包保持零渲染依赖**：本包之外不得把 intervention/image 引回核心包；图层/Canvas/Resolver 的改动在核心包仓库做。
 - **依赖解析走 packagist 直连**（全局 aliyun 镜像已移除——其元数据滞后，曾解析不到 intervention/image 4.x 稳定版）。本机安装依赖用仓库内 `composer.lock` 直接 `composer install`；如需恢复国内镜像自行 `composer config -g repos.packagist composer https://mirrors.aliyun.com/composer/`，注意滞后风险。
 - **CI**：workflow 会额外 checkout 核心包到工作区子目录，并把 path repository 重写指向它（path repo 的 `../` 相对路径在 CI 工作区里不存在）。

@@ -4,3 +4,4 @@ coverage.xml
 .phpunit.result.cache
 .DS_Store
 /visual-check.png
+/out.png

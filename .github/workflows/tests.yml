@@ -34,7 +34,7 @@ jobs:
       - name: Checkout core (php-canvas-next)
         uses: actions/checkout@v4
         with:
-          repository: hankchen/php-canvas-next
+          repository: HankChenCH/php-canvas-next
           path: php-canvas-next
 
       - name: Setup PHP

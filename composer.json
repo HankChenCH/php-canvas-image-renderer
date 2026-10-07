@@ -3,12 +3,8 @@
     "description": "intervention/image v4 bitmap renderer backend for hankchen/php-canvas-next",
     "type": "library",
     "license": "MIT",
-    "repositories": {
-        "0": {
-            "type": "path",
-            "url": "../php-canvas-next"
-        }
-    },
+    "keywords": ["canvas", "image", "gd", "imagick", "intervention-image"],
+    "homepage": "https://github.com/HankChenCH/php-canvas-image-renderer",
     "autoload": {
         "psr-4": {
             "HankChen\\CanvasNext\\Renderer\\Image\\": "src/"

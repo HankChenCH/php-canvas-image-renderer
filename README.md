@@ -1,9 +1,9 @@
 # php-canvas-image-renderer
 
-[`hankchen/php-canvas-next`](https://github.com/hankchen/php-canvas-next) 的位图渲染后端：
+[`hankchen/php-canvas-next`](https://github.com/HankChenCH/php-canvas-next) 的位图渲染后端：
 把结构树渲染为 intervention/image v4 的 `ImageInterface`（GD / Imagick 驱动）。
 
-核心包（结构 + 渲染契约 + 资源物化）见 [php-canvas-next](https://github.com/hankchen/php-canvas-next) 的 README 与设计文档。
+核心包（结构 + 渲染契约 + 资源物化）见 [php-canvas-next](https://github.com/HankChenCH/php-canvas-next) 的 README 与设计文档。
 
 ## 安装
 
@@ -44,4 +44,8 @@ composer test
 php scripts/visual-check.php out.png   # 渲染目验样图
 ```
 
-本地开发通过 composer path repository 引用同级目录的核心包 `../php-canvas-next`。
+核心包依赖走 Packagist。本地跨包联调时临时指向同级核心包（写入 composer.json，勿提交）：
+
+```sh
+composer config repositories.php-canvas-next path ../php-canvas-next
+```
