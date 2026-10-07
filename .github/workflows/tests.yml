@@ -37,6 +37,13 @@ jobs:
           repository: HankChenCH/php-canvas-next
           path: php-canvas-next
 
+      # 核心包已去硬编码 version:path 仓库的包版本由 git tag 推导,
+      # main HEAD 只能解析出 dev-main 不满足 ^1.0 约束——切到最新 release tag
+      - name: Checkout core at latest release tag
+        run: |
+          git -C php-canvas-next fetch --tags --force
+          git -C php-canvas-next checkout "$(git -C php-canvas-next describe --tags --abbrev=0)"
+
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
