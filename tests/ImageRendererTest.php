@@ -558,6 +558,8 @@ class ImageRendererTest extends CanvasTestCase
         };
 
         $this->assertSame($outcome(false), $outcome(true), '损坏图 contain 渲染结局必须与 cover 完全一致');
+
+        @unlink($src);
     }
 
     public function testTemplateTablePipelineRendersExpandedRows(): void
