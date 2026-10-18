@@ -413,6 +413,153 @@ class ImageRendererTest extends CanvasTestCase
         }
     }
 
+    // ------------------------------------------------------------------
+    // 图片层适配模式 contain（ADR 0023 / spec §4-§5）：绘制分派层按源图内在比例
+    // 把目标矩形收缩成等比矩形再调原语——空隙透明露下层与盒背景、按 align+padding
+    // 放置；cover 缺省（存量断言）/未知值/显式 cover/损坏图降级路径零回归
+    // ------------------------------------------------------------------
+
+    /**
+     * contain 等比收缩后的空隙透出图层盒背景色：40x10 源图（左红右蓝）进 40x20 盒，
+     * 收缩矩形 40x10 居中放 y∈[5,15)，上下空隙露白底（cover 会在此处铺满图色）
+     */
+    public function testContainLeavesGapShowingLayerBoxBackground(): void
+    {
+        $wide = $this->twoColorPng(40, 10, '#f00', '#00f', 20);
+
+        $layer = ImageLayer::make(40, 20, '#ffffff')
+            ->setImage($wide)
+            ->setFit(ImageLayer::FIT_CONTAIN);
+
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $layer);
+
+        $this->assertPixelSame([255, 0, 0], $image, 10, 10);
+        $this->assertPixelSame([0, 0, 255], $image, 30, 10);
+        // 上下空隙 = 盒背景白；cover 降级时 (20,2) 是红（放大裁切铺满）
+        $this->assertPixelSame([255, 255, 255], $image, 20, 2);
+        $this->assertPixelSame([255, 255, 255], $image, 20, 18);
+        // 收缩矩形边界精确贴 y∈[5,15)：行 5/14 是图、行 4/15 是空隙
+        $this->assertPixelSame([255, 0, 0], $image, 10, 5);
+        $this->assertPixelSame([255, 0, 0], $image, 10, 14);
+        $this->assertPixelSame([255, 255, 255], $image, 10, 4);
+        $this->assertPixelSame([255, 255, 255], $image, 10, 15);
+    }
+
+    /**
+     * 空隙透明露下层：图层盒无背景色（drawRect 跳过），收缩矩形外的空隙
+     * 直接透出优先级更高的垫底红层——证明空隙是透明而非填充色
+     */
+    public function testContainGapTransparencyRevealsLowerLayer(): void
+    {
+        $red = ImageLayer::make(40, 20, '#f00')->setPriority(5);
+        $wide = $this->twoColorPng(40, 10, '#ff00ff', '#0000ff', 20);
+        $contain = ImageLayer::make(40, 20)->setImage($wide)->setFit(ImageLayer::FIT_CONTAIN)->setPriority(1);
+
+        $image = (new ImageRenderer())->render(
+            new NullCancellation(),
+            Canvas::make(40, 20, $red, $contain)
+        );
+
+        // 上下空隙透出垫底红层；收缩矩形 y∈[5,15) 内是源图（左品红右蓝）
+        $this->assertPixelSame([255, 0, 0], $image, 20, 2);
+        $this->assertPixelSame([255, 0, 0], $image, 20, 18);
+        $this->assertPixelSame([255, 0, 255], $image, 10, 10);
+        $this->assertPixelSame([0, 0, 255], $image, 30, 10);
+        // 矩形边界：行 5/14 是图、行 4/15 是垫底红
+        $this->assertPixelSame([255, 0, 255], $image, 10, 5);
+        $this->assertPixelSame([255, 0, 255], $image, 10, 14);
+        $this->assertPixelSame([255, 0, 0], $image, 10, 4);
+        $this->assertPixelSame([255, 0, 0], $image, 10, 15);
+    }
+
+    /**
+     * contain 收缩矩形按 align + padding 放置（非居中组合）：100x60 盒 padding
+     * 上10/右30/下20/左20 + left/top，内容盒 50x30，40x10 源图收缩 50x12
+     * （scale = min(50/40, 30/10) = 1.25）贴内容盒左上原点 (20,10)
+     */
+    public function testContainPlacesShrunkRectByAlignAndPadding(): void
+    {
+        $wide = $this->twoColorPng(40, 10, '#f00', '#00f', 20);
+
+        $layer = ImageLayer::make(100, 60, '#ffffff')
+            ->setImage($wide)
+            ->setFit(ImageLayer::FIT_CONTAIN)
+            ->setPadding(10, 30, 20, 20)
+            ->setHorizontalAlign('left')
+            ->setVerticalAlign('top');
+
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $layer);
+
+        // 收缩矩形 [20,70)x[10,22)：贴 padding 原点，分界线 x=45（本地 25 = 源 20）
+        $this->assertPixelSame([255, 0, 0], $image, 20, 15);
+        $this->assertPixelSame([255, 0, 0], $image, 40, 15);
+        $this->assertPixelSame([0, 0, 255], $image, 60, 15);
+        $this->assertPixelSame([0, 0, 255], $image, 69, 15);
+        // 放置精度：首行贴 y=10（padding top），上方露盒背景
+        $this->assertPixelSame([255, 0, 0], $image, 40, 10);
+        $this->assertPixelSame([255, 255, 255], $image, 40, 9);
+        // 左侧 padding 空隙露盒背景
+        $this->assertPixelSame([255, 255, 255], $image, 19, 15);
+        // 矩形下方至内容盒底（y<40）的空隙露盒背景；cover 会铺满内容盒此处是蓝
+        $this->assertPixelSame([255, 255, 255], $image, 40, 22);
+        $this->assertPixelSame([255, 255, 255], $image, 40, 39);
+    }
+
+    /**
+     * 渲染面降级零回归（点位与 testImageIsCoverCroppedIntoContentBox 一致）：
+     * 未知 fit 值（白名单在渲染臂，wire 透传保存）与显式 cover（归一缺省态）
+     * 都按 cover 原路径渲染
+     */
+    public function testUnknownFitValueAndExplicitCoverRenderSamePixelsAsCover(): void
+    {
+        $wide = $this->twoColorPng(40, 10, '#f00', '#00f', 20);
+
+        // 未知值经 wire 透传（往返恒等），渲染按 cover 降级
+        $graph = ImageLayer::make(20, 20, '#fff')->setImage($wide)->graph();
+        $graph['spec']['fit'] = 'fill';
+        $layer = ImageLayer::fromGraph($graph);
+        $this->assertSame('fill', $layer->getFit());
+
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $layer);
+        $this->assertPixelSame([255, 0, 0], $image, 5, 10);
+        $this->assertPixelSame([0, 0, 255], $image, 15, 10);
+
+        // 显式 cover 归一为缺省态，走同一 cover 路径
+        $explicit = ImageLayer::make(20, 20, '#fff')->setImage($wide)->setFit(ImageLayer::FIT_COVER);
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $explicit);
+        $this->assertPixelSame([255, 0, 0], $image, 5, 10);
+        $this->assertPixelSame([0, 0, 255], $image, 15, 10);
+    }
+
+    /**
+     * 损坏图 + contain 降级走 cover 路径（ADR 0023）：渲染结果与无 fit 的 cover
+     * 逐位一致——fit 臂 @getimagesize 读取失败不告警、不新增异常面。位图端 cover
+     * 路径对不可解码文件的结局随驱动而定（GD 抛解码失败；Imagick 可能同样抛，
+     * 也可能经 TXT 兜底成图），故断言两次渲染 outcome 等价而非具体结局
+     */
+    public function testCorruptedImageWithContainFollowsCoverPathExactly(): void
+    {
+        $src = sys_get_temp_dir() . '/canvas-next-test-broken-' . uniqid() . '.png';
+        file_put_contents($src, 'definitely-not-an-image');
+
+        $outcome = function (bool $contain) use ($src): array {
+            $layer = ImageLayer::make(100, 50, '#ffffff')->setImage($src);
+            if ($contain) {
+                $layer->setFit(ImageLayer::FIT_CONTAIN);
+            }
+
+            try {
+                $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $layer);
+
+                return ['image', $image->width(), $image->height()];
+            } catch (\Throwable $e) {
+                return ['exception', get_class($e), $e->getMessage()];
+            }
+        };
+
+        $this->assertSame($outcome(false), $outcome(true), '损坏图 contain 渲染结局必须与 cover 完全一致');
+    }
+
     public function testTemplateTablePipelineRendersExpandedRows(): void
     {
         // V2 全链路：graph 序列化 → 解码 → 展开 → 位图渲染
