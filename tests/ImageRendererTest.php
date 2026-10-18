@@ -3,6 +3,7 @@
 namespace HankChen\CanvasNext\Renderer\Image\Tests;
 
 use HankChen\CanvasNext\Canvas;
+use HankChen\CanvasNext\CanvasBackground;
 use HankChen\CanvasNext\Contracts\DownloaderInterface;
 use HankChen\CanvasNext\Exception\MaterializeException;
 use HankChen\CanvasNext\Hydrate\CanvasHydrator;
@@ -291,6 +292,127 @@ class ImageRendererTest extends CanvasTestCase
         }
     }
 
+    // ------------------------------------------------------------------
+    // 画布背景（ADR 0022 / spec §4）：铺色在图层之下；背景图 cover 铺满、透明区露色；
+    // 画布级惰性物化（禁预遍历、失败即抛无产物）
+    // ------------------------------------------------------------------
+
+    public function testCanvasBackgroundColorPaintedUnderLayers(): void
+    {
+        // 背景色垫底：图层区盖在背景上，图层外露背景色（先色后进根层循环）
+        $white = $this->solidPng(20, 20, '#ffffff');
+        $canvas = Canvas::make(40, 20, ImageLayer::make(20, 20)->setImage($white)->setPosition(20, 0))
+            ->setBackground(new CanvasBackground('#ff0000'));
+
+        $image = (new ImageRenderer())->render(new NullCancellation(), $canvas);
+
+        $this->assertPixelSame([255, 0, 0], $image, 5, 10);
+        $this->assertPixelSame([255, 0, 0], $image, 19, 19);
+        $this->assertPixelSame([255, 255, 255], $image, 30, 10);
+    }
+
+    public function testCanvasWithBackgroundOnlyIsFullyTinted(): void
+    {
+        // 零图层画布：整面背景色（背景之下无物，画布初始透明被填充取代）
+        $canvas = Canvas::make(10, 10)->setBackground(new CanvasBackground('#00ff00'));
+
+        $image = (new ImageRenderer())->render(new NullCancellation(), $canvas);
+
+        $this->assertPixelSame([0, 255, 0], $image, 0, 0);
+        $this->assertPixelSame([0, 255, 0], $image, 9, 9);
+    }
+
+    public function testCanvasBackgroundImageCoversCanvasWithTransparentAreaShowingColor(): void
+    {
+        // 左半红右半透明的背景图 cover 铺满画布：图上区露图、透明区露背景色（先色后图）
+        $canvas = Canvas::make(40, 20)
+            ->setBackground(new CanvasBackground('#00ff00', $this->halfTransparentPng(40, 20, '#ff0000')));
+
+        $image = (new ImageRenderer())->render(new NullCancellation(), $canvas);
+
+        $this->assertPixelSame([255, 0, 0], $image, 10, 10);
+        $this->assertPixelSame([0, 255, 0], $image, 30, 10);
+    }
+
+    public function testCanvasBackgroundImageCoverScalesUpToFillCanvas(): void
+    {
+        // 适配固定 cover（spec §2 Q2）：20x10 图铺 40x20 画布 = 放大铺满，四角皆是图色
+        $canvas = Canvas::make(40, 20)->setBackground(new CanvasBackground('#00ff00', $this->solidPng(20, 10, '#ff0000')));
+
+        $image = (new ImageRenderer())->render(new NullCancellation(), $canvas);
+
+        $this->assertPixelSame([255, 0, 0], $image, 0, 0);
+        $this->assertPixelSame([255, 0, 0], $image, 39, 19);
+    }
+
+    public function testCanvasBackgroundImageMaterializedLazilyAtRenderTime(): void
+    {
+        // 画布级惰性物化（ADR 0022）：resolve() 预遍历一旦发生即失败；
+        // 背景在根层循环前物化一次（远程引用下载），图层照旧按需
+        $downloader = new class($this->pngBytes(8, 8, '#f00')) implements DownloaderInterface {
+            public array $calls = [];
+
+            public function __construct(private readonly string $content)
+            {
+            }
+
+            public function download(Cancellation $ctx, string $url): string|false
+            {
+                $this->calls[] = $url;
+
+                return $this->content;
+            }
+        };
+
+        $spy = new class($downloader) extends ResourceResolver {
+            public array $resolvedLayers = [];
+
+            public function resolve(Cancellation $ctx, Canvas $canvas): void
+            {
+                throw new \RuntimeException('render() 不应触发预遍历物化');
+            }
+
+            public function resolveLayer(Cancellation $ctx, AbstractLayer $layer): void
+            {
+                $this->resolvedLayers[] = get_class($layer);
+                parent::resolveLayer($ctx, $layer);
+            }
+        };
+
+        $url = 'https://cdn.example.com/bg-' . uniqid() . '.png';
+        // 图层盒无背景色：drawRect 跳过，背景图得以在图层透出
+        $canvas = Canvas::make(20, 20, ImageLayer::make(20, 20))
+            ->setBackground(new CanvasBackground(null, $url));
+
+        $image = (new ImageRenderer($spy))->render(new NullCancellation(), $canvas);
+
+        $this->assertSame([ImageLayer::class], $spy->resolvedLayers);
+        $this->assertCount(1, $downloader->calls);
+        $this->assertPixelSame([255, 0, 0], $image, 10, 10);
+    }
+
+    public function testCanvasBackgroundImageMaterializeFailureThrowsWithNoProduct(): void
+    {
+        // 失败语义：绘制期抛出、无产物返回（渲染面随异常丢弃）
+        $downloader = new class implements DownloaderInterface {
+            public function download(Cancellation $ctx, string $url): string|false
+            {
+                return false;
+            }
+        };
+
+        $renderer = new ImageRenderer(new ResourceResolver($downloader));
+        $canvas = Canvas::make(10, 10)
+            ->setBackground(new CanvasBackground('#ffffff', 'https://cdn.example.com/missing-' . uniqid() . '.png'));
+
+        try {
+            $renderer->render(new NullCancellation(), $canvas);
+            $this->fail('背景物化失败必须在绘制期抛出');
+        } catch (MaterializeException $e) {
+            $this->assertSame('resource_download_failed', $e->getErrorCode());
+        }
+    }
+
     public function testTemplateTablePipelineRendersExpandedRows(): void
     {
         // V2 全链路：graph 序列化 → 解码 → 展开 → 位图渲染
@@ -352,6 +474,22 @@ class ImageRendererTest extends CanvasTestCase
     {
         $path = sys_get_temp_dir() . '/canvas-next-test-' . uniqid() . '.png';
         file_put_contents($path, $this->pngBytes($width, $height, $color));
+
+        return $path;
+    }
+
+    /**
+     * 生成左半 color、右半全透明的 PNG 文件（不 fill，保留 createImage 的透明底）
+     */
+    private function halfTransparentPng(int $width, int $height, string $color): string
+    {
+        $image = ImageManagerFactory::make()->createImage($width, $height);
+        $image->drawRectangle(function (RectangleFactory $rect) use ($width, $height, $color) {
+            $rect->at(0, 0)->size(intdiv($width, 2), $height)->background($color);
+        });
+
+        $path = sys_get_temp_dir() . '/canvas-next-test-' . uniqid() . '.png';
+        file_put_contents($path, $image->encodeUsingFileExtension('png')->toString());
 
         return $path;
     }

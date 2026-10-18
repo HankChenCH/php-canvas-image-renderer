@@ -37,8 +37,8 @@ foreach ([
 }
 $font = $ttf ?? '';
 
-// 白色底（最垫底），避免透明区域
-$base = ImageLayer::make(400, 480, '#ffffff')->setPriority(11);
+// 画布背景（ADR 0022）：白底由画布级 background 声明承担（替代原人造白底层），先于图层铺装
+$background = HankChen\CanvasNext\CanvasBackground::make('#ffffff');
 
 // 头图色块
 $header = ImageLayer::make(400, 90, '#2d6cdf')->setPosition(0, 0)->setPriority(10);
@@ -140,7 +140,8 @@ $autoWidthMultiline = TextLayer::make('auto', 'auto', '#f0f9eb')
     ->setPosition(220, 415)
     ->setPriority(4);
 
-$canvas = Canvas::make(400, 480, $base, $header, $title, $paragraph, $table, $qr, $strip, $footer, $autoWidthSingle, $autoWidthMultiline);
+$canvas = Canvas::make(400, 480, $header, $title, $paragraph, $table, $qr, $strip, $footer, $autoWidthSingle, $autoWidthMultiline)
+    ->setBackground($background);
 
 $output = $argv[1] ?? (__DIR__ . '/../visual-check.png');
 $image = (new ImageRenderer())->render(new NullCancellation(), $canvas);
