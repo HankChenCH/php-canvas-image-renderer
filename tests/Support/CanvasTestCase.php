@@ -68,6 +68,20 @@ abstract class CanvasTestCase extends TestCase
     }
 
     /**
+     * 容差像素取样（JPEG 有损压缩用，镜像 go-canvas image-renderer 的 assertPixelNear）
+     */
+    protected function assertPixelNear(array $expected, ImageInterface $image, int $x, int $y, int $tolerance = 60): void
+    {
+        $actual = $this->pixel($image, $x, $y);
+        $this->assertLessThanOrEqual(
+            $tolerance,
+            max(abs($actual[0] - $expected[0]), abs($actual[1] - $expected[1]), abs($actual[2] - $expected[2])),
+            "像素({$x}, {$y}) 颜色 [" . implode(',', $actual) . "] 与预期 ["
+            . implode(',', $expected) . "] 相差超容差 {$tolerance}"
+        );
+    }
+
+    /**
      * 生成纯色 PNG 的二进制内容
      */
     protected function pngBytes(int $width, int $height, string $color): string

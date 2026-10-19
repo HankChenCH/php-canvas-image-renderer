@@ -2,6 +2,11 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## 2.0.1 - 2026-10-19
+
+- EXIF 旋转图坐标系契约显式化（07 票，跟随核心包 v2.0.1 的分派内在尺寸 EXIF 感知）：`drawImage` 移除解码后冗余 `orient()`（intervention v4 `autoOrientation` 双驱动**解码即归正**，显式调用恒空转）——srcRect 与分派层 intrinsicSize 同坐标系（EXIF 方向图为观察方向），整图哨兵取归正位图整幅；历史版本「归正先于裁窗」的表述即因冗余 orient 掩盖了真实次序。像素回归：EXIF orientation 6 两腿（fill 整图观察方向左蓝右红、cover 居中裁窗在内在坐标系取窗后转正），容差取样助手 `assertPixelNear`（镜像 go-canvas 同名）与 `twoBandExifJpeg` 夹具助手落 CanvasTestCase/测试类，GD 驱动本机验证、Imagick 腿由 CI 覆盖
+- 依赖：`hankchen/php-canvas-next` 消费 v2.0.1（约束 `^2.0` 不变）
+
 ## 2.0.0 - 2026-10-19
 
 **Breaking（ADR 0024）**：`ImageRenderer::drawImage` 跟随核心包 v2.0.0 的双矩形 blit 原语签名——`drawImage(string $src, int $sx, int $sy, int $sw, int $sh, int $dx, int $dy, int $dw, int $dh)`，自定义后端作者参照本包实现迁移。

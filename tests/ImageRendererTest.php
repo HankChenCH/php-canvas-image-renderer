@@ -748,6 +748,41 @@ class ImageRendererTest extends CanvasTestCase
     }
 
     /**
+     * EXIF 旋转图整图 blit 保持归正（观察方向）：orientation=6 顺时针 90°，
+     * 8x16 上红下蓝观察为 16x8 左蓝右红（原下缘转到左缘）——fill 整图路径，
+     * JPEG 有损容差取样（镜像 go-canvas TestDrawImageExifRotatedWholeImageUpright）
+     */
+    public function testExifRotatedWholeImageStaysUpright(): void
+    {
+        $layer = ImageLayer::make(16, 8, '#ffffff')
+            ->setImage($this->twoBandExifJpeg(6))
+            ->setFit(ImageLayer::FIT_FILL);
+
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $layer);
+
+        $this->assertPixelNear([0, 0, 255], $image, 4, 4);
+        $this->assertPixelNear([255, 0, 0], $image, 12, 4);
+    }
+
+    /**
+     * EXIF 旋转图窗口 blit 取内在（未归正）坐标系、归正后置于裁窗（ADR 0024
+     * 契约显式化，07 票裁决，镜像 go-canvas TestDrawImageExifRotatedCropsWindowIn-
+     * IntrinsicCoordinates）：cover 16x8 盒对 8x16 源的居中裁窗 (0,6,8,4) 在内在
+     * 坐标横跨红蓝分界（行 6..9）——转正后观察方向左蓝右红；归正先于裁窗的
+     * 旧序会按归正坐标系错窗、越界黑补（GD 实测图外 (0,0,0,255) 不抛错）
+     */
+    public function testExifRotatedCoverWindowTakenInIntrinsicCoordinates(): void
+    {
+        $layer = ImageLayer::make(16, 8, '#ffffff')
+            ->setImage($this->twoBandExifJpeg(6));
+
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $layer);
+
+        $this->assertPixelNear([0, 0, 255], $image, 4, 4);
+        $this->assertPixelNear([255, 0, 0], $image, 12, 4);
+    }
+
+    /**
      * 生成左半 oneColor、右半 otherColor 的 PNG 文件
      */
     private function twoColorPng(int $width, int $height, string $oneColor, string $otherColor, int $splitX): string
@@ -804,6 +839,35 @@ class ImageRendererTest extends CanvasTestCase
         return $this->writePngToTemp(
             ImageManagerFactory::make()->createImage($width, $height)->fill($color)
         );
+    }
+
+    /**
+     * 生成 8x16 上红下蓝、携带指定 EXIF orientation 的 JPEG（EXIF 次序测试共用
+     * 夹具，镜像 go-canvas image-renderer 同名助手）：GD 编码后在 SOI 后注入
+     * 最小 APP1 Exif 段（II 字节序 TIFF，IFD0 仅 Orientation 一项 SHORT）
+     */
+    private function twoBandExifJpeg(int $orientation): string
+    {
+        $image = imagecreatetruecolor(8, 16);
+        $red = imagecolorallocate($image, 255, 0, 0);
+        $blue = imagecolorallocate($image, 0, 0, 255);
+        imagefilledrectangle($image, 0, 0, 7, 7, $red);
+        imagefilledrectangle($image, 0, 8, 7, 15, $blue);
+        $path = sys_get_temp_dir() . '/canvas-next-test-' . uniqid() . '.jpg';
+        imagejpeg($image, $path, 100);
+        imagedestroy($image);
+
+        $ifd = pack('v', 1)
+            . pack('v', 0x0112) . pack('v', 3) . pack('V', 1)
+            . pack('v', $orientation) . pack('v', 0)
+            . pack('V', 0);
+        $payload = "Exif\x00\x00" . 'II' . pack('v', 42) . pack('V', 8) . $ifd;
+        $app1 = "\xFF\xE1" . pack('n', strlen($payload) + 2) . $payload;
+
+        $bytes = file_get_contents($path);
+        file_put_contents($path, substr($bytes, 0, 2) . $app1 . substr($bytes, 2));
+
+        return $path;
     }
 
     /**
