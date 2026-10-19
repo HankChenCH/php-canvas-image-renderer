@@ -507,21 +507,29 @@ class ImageRendererTest extends CanvasTestCase
 
     /**
      * 渲染面降级零回归（点位与 testImageIsCoverCroppedIntoContentBox 一致）：
-     * 未知 fit 值（白名单在渲染臂，wire 透传保存）与显式 cover（归一缺省态）
-     * 都按 cover 原路径渲染。'scale-down' 是 CSS 有而本契约明示不收的档位
-     * （spec Q1），充当初底未知值；fill/tile 转正后是已知值不再降级
+     * 白名单外 fit 值（wire 透传保存）与显式 cover（归一缺省态）都按 cover
+     * 原路径渲染。两腿已知拒绝档 + 任意未知串——'scale-down' 是 CSS 有而本
+     * 契约明示不收的档位（spec Q1）；'flip' 是从未入册的任意未知串
+     * （go-canvas / js-canvas 同款示例，三端统一）
      */
-    public function testUnknownFitValueAndExplicitCoverRenderSamePixelsAsCover(): void
+    public function testFitValuesOutsideWhitelistAndExplicitCoverRenderSamePixelsAsCover(): void
     {
         $wide = $this->twoColorPng(40, 10, '#f00', '#00f', 20);
 
-        // 未知值经 wire 透传（往返恒等），渲染按 cover 降级
+        // 已知拒绝档 'scale-down' 经 wire 透传（往返恒等），渲染按 cover 降级
         $graph = ImageLayer::make(20, 20, '#fff')->setImage($wide)->graph();
         $graph['spec']['fit'] = 'scale-down';
         $layer = ImageLayer::fromGraph($graph);
         $this->assertSame('scale-down', $layer->getFit());
 
         $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $layer);
+        $this->assertPixelSame([255, 0, 0], $image, 5, 10);
+        $this->assertPixelSame([0, 0, 255], $image, 15, 10);
+
+        // 任意未知串 'flip' 同走 cover 降级
+        $unknown = ImageLayer::make(20, 20, '#fff')->setImage($wide)->graph();
+        $unknown['spec']['fit'] = 'flip';
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), ImageLayer::fromGraph($unknown));
         $this->assertPixelSame([255, 0, 0], $image, 5, 10);
         $this->assertPixelSame([0, 0, 255], $image, 15, 10);
 
