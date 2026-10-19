@@ -67,19 +67,32 @@ final class ImageRenderer extends AbstractRenderer
         });
     }
 
-    protected function drawImage(string $src, int $x, int $y, int $width, int $height): void
+    /**
+     * 双矩形 blit（ADR 0024）：把源图 (sx, sy) 起的 sw×sh 矩形非等比拉伸搬运至
+     * 目标 (dx, dy) 处的 dw×dh 矩形——decode → crop 源矩形 → resize 拉伸 →
+     * insert 左上对位（替换恒 cover，fit 几何全在核心包分派层）。
+     * sw/sh ≤ 0 为整图哨兵：按解码（含 EXIF 归正）实际尺寸取整图；
+     * dw/dh ≤ 0 防护不画（目标盒已由分派层 drawRect 承担）
+     */
+    protected function drawImage(string $src, int $sx, int $sy, int $sw, int $sh, int $dx, int $dy, int $dw, int $dh): void
     {
-        if ($width <= 0 || $height <= 0) {
+        if ($dw <= 0 || $dh <= 0) {
             return;
         }
 
+        $image = ImageManagerFactory::make()
+            ->decode($src)
+            ->orient();
+
+        if ($sw <= 0 || $sh <= 0) {
+            $sw = $image->width();
+            $sh = $image->height();
+        }
+
         $this->image->insert(
-            ImageManagerFactory::make()
-                ->decode($src)
-                ->orient()
-                ->cover($width, $height),
-            $x,
-            $y,
+            $image->crop($sw, $sh, $sx, $sy)->resize($dw, $dh),
+            $dx,
+            $dy,
             'top-left'
         );
     }

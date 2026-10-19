@@ -508,7 +508,8 @@ class ImageRendererTest extends CanvasTestCase
     /**
      * 渲染面降级零回归（点位与 testImageIsCoverCroppedIntoContentBox 一致）：
      * 未知 fit 值（白名单在渲染臂，wire 透传保存）与显式 cover（归一缺省态）
-     * 都按 cover 原路径渲染
+     * 都按 cover 原路径渲染。'scale-down' 是 CSS 有而本契约明示不收的档位
+     * （spec Q1），充当初底未知值；fill/tile 转正后是已知值不再降级
      */
     public function testUnknownFitValueAndExplicitCoverRenderSamePixelsAsCover(): void
     {
@@ -516,9 +517,9 @@ class ImageRendererTest extends CanvasTestCase
 
         // 未知值经 wire 透传（往返恒等），渲染按 cover 降级
         $graph = ImageLayer::make(20, 20, '#fff')->setImage($wide)->graph();
-        $graph['spec']['fit'] = 'fill';
+        $graph['spec']['fit'] = 'scale-down';
         $layer = ImageLayer::fromGraph($graph);
-        $this->assertSame('fill', $layer->getFit());
+        $this->assertSame('scale-down', $layer->getFit());
 
         $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $layer);
         $this->assertPixelSame([255, 0, 0], $image, 5, 10);
@@ -532,20 +533,20 @@ class ImageRendererTest extends CanvasTestCase
     }
 
     /**
-     * 损坏图 + contain 降级走 cover 路径（ADR 0023）：渲染结果与无 fit 的 cover
-     * 逐位一致——fit 臂 @getimagesize 读取失败不告警、不新增异常面。位图端 cover
-     * 路径对不可解码文件的结局随驱动而定（GD 抛解码失败；Imagick 可能同样抛，
-     * 也可能经 TXT 兜底成图），故断言两次渲染 outcome 等价而非具体结局
+     * 损坏图渲染结局跨全 fit 等价（ADR 0024）：内在尺寸读取失败在 fit 分派之前
+     * 统一退化「整图拉伸进目标矩形」（fill 形态）——四档 fit 走同一条退化臂，
+     * 位图端对不可解码文件的结局随驱动而定（GD 抛解码失败；Imagick 可能同样抛，
+     * 也可能经 TXT 兜底成图），故断言各 fit 渲染 outcome 互相一致而非具体结局
      */
-    public function testCorruptedImageWithContainFollowsCoverPathExactly(): void
+    public function testCorruptedImageOutcomeEquivalentAcrossAllFits(): void
     {
         $src = sys_get_temp_dir() . '/canvas-next-test-broken-' . uniqid() . '.png';
         file_put_contents($src, 'definitely-not-an-image');
 
-        $outcome = function (bool $contain) use ($src): array {
+        $outcome = function (?string $fit) use ($src): array {
             $layer = ImageLayer::make(100, 50, '#ffffff')->setImage($src);
-            if ($contain) {
-                $layer->setFit(ImageLayer::FIT_CONTAIN);
+            if ($fit !== null) {
+                $layer->setFit($fit);
             }
 
             try {
@@ -557,9 +558,153 @@ class ImageRendererTest extends CanvasTestCase
             }
         };
 
-        $this->assertSame($outcome(false), $outcome(true), '损坏图 contain 渲染结局必须与 cover 完全一致');
+        $baseline = $outcome(null);
+        foreach ([ImageLayer::FIT_COVER, ImageLayer::FIT_CONTAIN, ImageLayer::FIT_FILL, ImageLayer::FIT_TILE] as $fit) {
+            $this->assertSame($baseline, $outcome($fit), "损坏图 fit={$fit} 渲染结局必须与缺省完全一致");
+        }
 
         @unlink($src);
+    }
+
+    // ------------------------------------------------------------------
+    // 双矩形 blit 原语（ADR 0024）：后端零 fit 语义——decode → crop 源矩形 →
+    // 非等比拉伸 resize 至目标矩形 → insert。fill 的拉伸、tile 网格的逐块
+    // blit、cover 等比搬运在位图端的像素真相（无黄金文件，点位断言）
+    // ------------------------------------------------------------------
+
+    /**
+     * fill 整图拉伸进目标矩形：非等比源图比例失真可见、无 cover 裁切、无空隙——
+     * 40x10 三竖条源图（红[0,8)/绿[8,24)/蓝[24,40)）进 20x20 盒，1:2 横向压缩后
+     * 分界线落 dst x=4/12；cover 居中裁窗为源 x∈[15,25)，红条根本不可见
+     */
+    public function testFillStretchesWholeImageIntoBoxWithoutCropOrGap(): void
+    {
+        $layer = ImageLayer::make(20, 20, '#ffffff')
+            ->setImage($this->threeBandPng())
+            ->setFit(ImageLayer::FIT_FILL);
+
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $layer);
+
+        // 三条全部可见（cover 会裁掉红条），分界位置与 1:2 压缩一致
+        $this->assertPixelSame([255, 0, 0], $image, 1, 10);
+        $this->assertPixelSame([0, 255, 0], $image, 7, 10);
+        $this->assertPixelSame([0, 0, 255], $image, 15, 10);
+        // 垂直方向拉伸铺满整盒：上下边界行同色（无空隙）
+        $this->assertPixelSame([255, 0, 0], $image, 1, 0);
+        $this->assertPixelSame([255, 0, 0], $image, 1, 19);
+        $this->assertPixelSame([0, 0, 255], $image, 15, 0);
+        $this->assertPixelSame([0, 0, 255], $image, 15, 19);
+    }
+
+    /**
+     * tile 网格（非居中 align + 非对称 padding）：60x60 盒 padding 右10/下10，
+     * left/top 锚定首块于内容盒原点 (0,0)；20x20 四象限源图 1:1 重复 3x3 块，
+     * 末行末列被内容盒右/下边界截成半块（可见子矩形只含源图左/上半），
+     * 内容盒外（x/y≥50）露盒背景——网格不越出内容盒
+     */
+    public function testTileGridAnchorsByAlignWithGapAndTruncation(): void
+    {
+        $layer = ImageLayer::make(60, 60, '#ffffff')
+            ->setImage($this->quadrantPng())
+            ->setFit(ImageLayer::FIT_TILE)
+            ->setPadding(0, 10, 10, 0)
+            ->setHorizontalAlign('left')
+            ->setVerticalAlign('top');
+
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $layer);
+
+        // 首块四象限 1:1 原样（左上红/右上绿/左下蓝/右下黄）
+        $this->assertPixelSame([255, 0, 0], $image, 5, 5);
+        $this->assertPixelSame([0, 255, 0], $image, 15, 5);
+        $this->assertPixelSame([0, 0, 255], $image, 5, 15);
+        $this->assertPixelSame([255, 255, 0], $image, 15, 15);
+        // 第二块整块重复：同象限颜色在 +20 偏移处重现
+        $this->assertPixelSame([255, 0, 0], $image, 25, 25);
+        $this->assertPixelSame([255, 255, 0], $image, 35, 35);
+        // 末列截断：dst x∈[40,50) 只对应源 x∈[0,10)（左半列）——右象限色不得出现
+        $this->assertPixelSame([255, 0, 0], $image, 45, 5);
+        $this->assertPixelSame([0, 0, 255], $image, 45, 15);
+        // 末行截断：dst y∈[40,50) 只对应源 y∈[0,10)（上半行）——下象限色不得出现
+        $this->assertPixelSame([255, 0, 0], $image, 5, 45);
+        $this->assertPixelSame([0, 255, 0], $image, 15, 45);
+        // 角块双向截断：只含源图左上象限
+        $this->assertPixelSame([255, 0, 0], $image, 45, 45);
+        // 内容盒外露盒背景：截断语义（网格∩内容盒）下不得有图色越界
+        $this->assertPixelSame([255, 255, 255], $image, 55, 5);
+        $this->assertPixelSame([255, 255, 255], $image, 5, 55);
+        $this->assertPixelSame([255, 255, 255], $image, 55, 55);
+    }
+
+    /**
+     * tile 小图 center：25x25 盒 10x10 源图，网格锚点 ((25-10)/2, ·) = (7,7)——
+     * 锚点前的左/上空隙透出垫底绿层（证明空隙透明而非填充）；网格 2x2 块，
+     * 末行末列截成 8px 半块；分界线 x/y=7/17 精确
+     */
+    public function testTileSmallImageCentersGridWithTransparentGapBeforeAnchor(): void
+    {
+        $red = ImageLayer::make(25, 25, '#0f0')->setPriority(5);
+        $tile = ImageLayer::make(25, 25)
+            ->setImage($this->solidPng(10, 10, '#f00'))
+            ->setFit(ImageLayer::FIT_TILE)
+            ->setPriority(1);
+
+        $image = (new ImageRenderer())->render(new NullCancellation(), Canvas::make(25, 25, $red, $tile));
+
+        // 锚点前空隙透出垫底绿层（首块锚定于 (7,7)，锚前无网格）
+        $this->assertPixelSame([0, 255, 0], $image, 2, 2);
+        $this->assertPixelSame([0, 255, 0], $image, 10, 2);
+        $this->assertPixelSame([0, 255, 0], $image, 2, 10);
+        // 网格分界精确贴 x/y=7：行 6 是空隙、行 7 起是图
+        $this->assertPixelSame([0, 255, 0], $image, 10, 6);
+        $this->assertPixelSame([255, 0, 0], $image, 10, 7);
+        $this->assertPixelSame([0, 255, 0], $image, 6, 10);
+        $this->assertPixelSame([255, 0, 0], $image, 7, 10);
+        // 2x2 四块重复：末列/末行截成 8px（x/y∈[17,25)）仍全是图色
+        $this->assertPixelSame([255, 0, 0], $image, 12, 12);
+        $this->assertPixelSame([255, 0, 0], $image, 22, 12);
+        $this->assertPixelSame([255, 0, 0], $image, 12, 22);
+        $this->assertPixelSame([255, 0, 0], $image, 24, 24);
+    }
+
+    /**
+     * tile 大图 center：负锚点露图片中部（语义与 cover 同门）——40x10 双色图进
+     * 20x20 盒，锚点 (intval(-10), intval(5)) = (-10,5)：可见源窗为 x∈[10,30)
+     * （中部 20px，红蓝各占一半）；纵向 10px 单元在 y=5/15 两行，y∈[0,5) 空隙
+     * 透出垫底绿层、y∈[15,20) 为截断半行（源上半）
+     */
+    public function testTileLargeImageNegativeAnchorExposesImageCenter(): void
+    {
+        $red = ImageLayer::make(20, 20, '#0f0')->setPriority(5);
+        $tile = ImageLayer::make(20, 20)
+            ->setImage($this->twoColorPng(40, 10, '#f00', '#00f', 20))
+            ->setFit(ImageLayer::FIT_TILE)
+            ->setPriority(1);
+
+        $image = (new ImageRenderer())->render(new NullCancellation(), Canvas::make(20, 20, $red, $tile));
+
+        // 负锚点：可见源窗 x∈[10,30)（cover 窗为 [15,25)，两者都露中部但窗宽不同）
+        $this->assertPixelSame([255, 0, 0], $image, 5, 10);
+        $this->assertPixelSame([0, 0, 255], $image, 15, 10);
+        // y∈[0,5) 锚点前空隙透明；y∈[15,20) 截断半行（源 y∈[0,5)，色同首行）
+        $this->assertPixelSame([0, 255, 0], $image, 10, 2);
+        $this->assertPixelSame([255, 0, 0], $image, 5, 17);
+        $this->assertPixelSame([0, 0, 255], $image, 15, 17);
+    }
+
+    /**
+     * 目标尺寸 ≤0 防护只画盒（既有纪律，blit 后端不画不抛）：
+     * padding 吃掉全部盒尺寸后内容区为负，渲染结局 = 纯盒背景
+     */
+    public function testNonPositiveTargetSizeDrawsBoxOnly(): void
+    {
+        $layer = ImageLayer::make(20, 20, '#ffffff')
+            ->setImage($this->solidPng(8, 8, '#f00'))
+            ->setPadding(15);
+
+        $image = (new ImageRenderer())->renderLayer(new NullCancellation(), $layer);
+
+        $this->assertPixelSame([255, 255, 255], $image, 10, 10);
+        $this->assertPixelSame([255, 255, 255], $image, 19, 19);
     }
 
     public function testTemplateTablePipelineRendersExpandedRows(): void
@@ -613,18 +758,52 @@ class ImageRendererTest extends CanvasTestCase
             $rect->at($splitX, 0)->size($width - $splitX, $height)->background($otherColor);
         });
 
-        $path = sys_get_temp_dir() . '/canvas-next-test-' . uniqid() . '.png';
-        file_put_contents($path, $image->encodeUsingFileExtension('png')->toString());
+        return $this->writePngToTemp($image);
+    }
 
-        return $path;
+    /**
+     * 生成 40x10 三竖条 PNG：红 x∈[0,8)、绿 x∈[8,24)、蓝 x∈[24,40)
+     * （进 20x20 盒拉伸后分界线落 dst x=4/12，cover 居中裁窗看不到红条）
+     */
+    private function threeBandPng(): string
+    {
+        $image = ImageManagerFactory::make()->createImage(40, 10);
+        $image->fill('#f00');
+        $image->drawRectangle(function (RectangleFactory $rect) {
+            $rect->at(8, 0)->size(16, 10)->background('#0f0');
+        });
+        $image->drawRectangle(function (RectangleFactory $rect) {
+            $rect->at(24, 0)->size(16, 10)->background('#00f');
+        });
+
+        return $this->writePngToTemp($image);
+    }
+
+    /**
+     * 生成 20x20 四象限 PNG：左上红/右上绿/左下蓝/右下黄（tile 网格方向性断言用）
+     */
+    private function quadrantPng(): string
+    {
+        $image = ImageManagerFactory::make()->createImage(20, 20);
+        $image->fill('#f00');
+        $image->drawRectangle(function (RectangleFactory $rect) {
+            $rect->at(10, 0)->size(10, 10)->background('#0f0');
+        });
+        $image->drawRectangle(function (RectangleFactory $rect) {
+            $rect->at(0, 10)->size(10, 10)->background('#00f');
+        });
+        $image->drawRectangle(function (RectangleFactory $rect) {
+            $rect->at(10, 10)->size(10, 10)->background('#ff0');
+        });
+
+        return $this->writePngToTemp($image);
     }
 
     private function solidPng(int $width, int $height, string $color): string
     {
-        $path = sys_get_temp_dir() . '/canvas-next-test-' . uniqid() . '.png';
-        file_put_contents($path, $this->pngBytes($width, $height, $color));
-
-        return $path;
+        return $this->writePngToTemp(
+            ImageManagerFactory::make()->createImage($width, $height)->fill($color)
+        );
     }
 
     /**
@@ -637,6 +816,12 @@ class ImageRendererTest extends CanvasTestCase
             $rect->at(0, 0)->size(intdiv($width, 2), $height)->background($color);
         });
 
+        return $this->writePngToTemp($image);
+    }
+
+    /** 把渲染好的位图编码落盘到临时目录（测试源图统一出口） */
+    private function writePngToTemp(ImageInterface $image): string
+    {
         $path = sys_get_temp_dir() . '/canvas-next-test-' . uniqid() . '.png';
         file_put_contents($path, $image->encodeUsingFileExtension('png')->toString());
 
