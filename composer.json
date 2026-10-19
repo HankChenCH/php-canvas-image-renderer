@@ -25,7 +25,7 @@
     ],
     "require": {
         "php": "^8.3",
-        "hankchen/php-canvas-next": "^1.0",
+        "hankchen/php-canvas-next": "^2.0",
         "intervention/image": "^4.0"
     },
     "require-dev": {

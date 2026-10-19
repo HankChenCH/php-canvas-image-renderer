@@ -2,6 +2,15 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## 2.0.0 - 2026-10-19
+
+**Breaking（ADR 0024）**：`ImageRenderer::drawImage` 跟随核心包 v2.0.0 的双矩形 blit 原语签名——`drawImage(string $src, int $sx, int $sy, int $sw, int $sh, int $dx, int $dy, int $dw, int $dh)`，自定义后端作者参照本包实现迁移。
+
+- `drawImage` 按 blit 契约重写：decode → crop 源矩形 → 非等比拉伸 resize 至目标矩形 → insert 左上对位（替换恒 `->cover()`），原语零 fit 语义；sw/sh ≤ 0 为整图哨兵（按解码含 EXIF 归正后实际尺寸取整图），dw/dh ≤ 0 防护不画（既有纪律，目标盒由分派层 drawRect 承担）——fill 拉伸 / tile 逐块 blit / cover 等比搬运 / contain 收缩全部由核心包分派层算定几何，GD/Imagick 双驱同源语义
+- 像素点位测试（无黄金文件，assertPixelSame 先例）：fill 拉伸形变（三竖条源图 1:2 压缩分界点位，无 cover 裁切无空隙）、tile 网格（left/top 非居中锚定 + 四象限源图整块重复 + 末行末列半块截断 + 内容盒外露盒背景、小图 center 锚点前空隙透出垫底层、大图 center 负锚点露图片中部）、dw/dh ≤ 0 只画盒
+- cover / contain 存量点位零 diff 回归；未知 fit 值降级改用 `'scale-down'` 充当未知值（fill 转正后是已知值不再降级）；损坏图断言升级为全 fit 渲染结局互相等价（内在尺寸失败统一退化 fill 形态，ADR 0024）
+- 依赖：`hankchen/php-canvas-next` 约束升 `^2.0`
+
 ## 1.2.0 - 2026-10-18
 
 - 图片层适配模式 contain 测试跟随（ADR 0023）：绘制原语与 `src/` 零改动——收缩矩形由核心包 `paintImage` 分派算得，后端只承接 `drawImage` 调用
