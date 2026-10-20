@@ -140,7 +140,45 @@ $autoWidthMultiline = TextLayer::make('auto', 'auto', '#f0f9eb')
     ->setPosition(220, 415)
     ->setPriority(4);
 
-$canvas = Canvas::make(400, 480, $header, $title, $paragraph, $table, $qr, $strip, $footer, $autoWidthSingle, $autoWidthMultiline)
+// 裁剪形状圆形档样例（ADR 0026）：先造一张类照片源图（两色带 + 色块）
+$tmpPhoto = sys_get_temp_dir() . '/canvas-next-visual-photo.png';
+$photo = \HankChen\CanvasNext\Renderer\Image\ImageManagerFactory::make()->createImage(200, 200);
+$photo->drawRectangle(function (\Intervention\Image\Geometry\Factories\RectangleFactory $rect) {
+    $rect->at(0, 0)->size(200, 120)->background('#7ec8e3');
+});
+$photo->drawRectangle(function (\Intervention\Image\Geometry\Factories\RectangleFactory $rect) {
+    $rect->at(0, 120)->size(200, 80)->background('#4a7fb5');
+});
+$photo->drawEllipse(function (\Intervention\Image\Geometry\Factories\EllipseFactory $ellipse) {
+    $ellipse->at(100, 80)->size(70, 70)->background('#f5d76e');
+});
+file_put_contents($tmpPhoto, $photo->encodeUsingFileExtension('png')->toString());
+
+// 方盒圆形档：内切圆 = 整个内容盒，cover 取景
+$avatarSquare = ImageLayer::make(80, 80, '#eef3fd')
+    ->setImage($tmpPhoto)
+    ->setClip(ImageLayer::CLIP_CIRCLE)
+    ->setPosition(20, 470)
+    ->setPriority(4);
+
+// 非方盒圆形档：恒正圆内切（左右留透明边）、padding 即环外留白、边框沿圆周描成环
+$avatarWide = ImageLayer::make(120, 70, '#fdebd0')
+    ->setImage($tmpPhoto)
+    ->setPadding(6)
+    ->setBorder(4, '#e67e22')
+    ->setClip(ImageLayer::CLIP_CIRCLE)
+    ->setPosition(120, 475)
+    ->setPriority(4);
+
+// 无图圆形底框：背景色填进内切圆 + 圆周描边（框的形态独立于内容）
+$avatarEmpty = ImageLayer::make(80, 80, '#d5f5e3')
+    ->setPadding(8)
+    ->setBorder(3, '#27ae60')
+    ->setClip(ImageLayer::CLIP_CIRCLE)
+    ->setPosition(260, 470)
+    ->setPriority(4);
+
+$canvas = Canvas::make(400, 570, $header, $title, $paragraph, $table, $qr, $strip, $footer, $autoWidthSingle, $autoWidthMultiline, $avatarSquare, $avatarWide, $avatarEmpty)
     ->setBackground($background);
 
 $output = $argv[1] ?? (__DIR__ . '/../visual-check.png');

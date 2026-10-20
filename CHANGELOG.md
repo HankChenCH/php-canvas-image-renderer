@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## 2.1.0 - 2026-10-20
+
+- 形状能力口实现（ADR 0026，跟随核心包 v2.1.0 的圆形档分派，`ImageRenderer` 实现 `ShapeCapableRenderer`）：`drawEllipse` 椭圆绘制（fill+stroke 一体，v4 EllipseFactory，外接矩形→圆心换算收敛单处与掩码合成共用；描边带落位随驱动原生行为——GD 内描、Imagick 居中，采样验收取公共带吸收）与 `drawImageMasked` 掩码 blit（双矩形 blit 后以给定矩形内切椭圆为掩码裁切：掩码画布 = createImage 透明底 + 白椭圆，Imagick 走 `setImageAlphaChannel` + DSTIN 通道合成保留矢量软边、GD 走逐像素二值 alpha；掩码矩形为画布绝对坐标，换算到目标坐标系后超界自然裁掉）
+- 依赖：`hankchen/php-canvas-next` 消费 v2.1.0（约束 `^2.0` 不变）
+- 像素点位测试（无黄金文件，assertPixelSame 先例）：圆形档四角透明露下层、圆心为图、环带为描边色（采样半径取 GD/Imagick 描边带公共区）、padding 区留白、非方盒恒正圆留透明边、circle × fit 四档组合（cover/fill/contain/tile）、未知 clip 值降级矩形；visual-check 目验样图补圆形档三样例（方盒 cover、非方盒内切+padding+环带描边、无图圆底框）
+
 ## 2.0.2 - 2026-10-19
 
 - 测试勘误（retro 08 票，src/ 零改动）：降级回归测试更名——原「UnknownFitValue」名不副实，'scale-down' 是已知拒绝档（spec Q1 明示不收）非任意未知串，且任意未知串的渲染降级覆盖缺失；补真未知串 `'flip'` 腿并与 go-canvas / js-canvas 示例统一，测试名更 `testFitValuesOutsideWhitelistAndExplicitCoverRenderSamePixelsAsCover`

@@ -6,7 +6,7 @@
 
 ## Layout
 
-- `src/ImageRenderer.php` — 渲染后端：继承核心包 `AbstractRenderer` 模板，只实现 `begin/end/drawRect/drawImage/drawText` 五个绘制原语。
+- `src/ImageRenderer.php` — 渲染后端：继承核心包 `AbstractRenderer` 模板，实现 `begin/end/drawRect/drawImage/drawText` 五个绘制原语 + 形状能力口（ADR 0026）`drawEllipse`（椭圆 fill+stroke 一体，v4 EllipseFactory；描边带落位随驱动原生行为——GD 内描、Imagick 居中）与 `drawImageMasked`（drawImage 的掩码形态：blit 后以给定矩形内切椭圆裁切，Imagick 走 DSTIN 通道合成、GD 走逐像素二值 alpha）。
 - `src/ImageManagerFactory.php` — 共享 `ImageManager` 单例（Imagick 优先，退回 GD）。
 - `tests/Support/CanvasTestCase.php` — 像素取样（`pixel`/`assertPixelSame`）、PNG 生成（`pngBytes`）、`systemTtf()`/`usesImagickDriver()`、缓存目录清理；核心包的同名基类只有目录清理（结构侧无像素测试）。
 
